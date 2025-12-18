@@ -1,0 +1,84 @@
+version: '3.8'
+
+services:
+  # Banco de Dados
+  db:
+    image: pgvector/pgvector:pg15
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # Cache Rápido
+  redis:
+    image: redis:7-alpine
+    restart: always
+    volumes:
+      - redis_data:/data
+
+  # Painel Chatwoot (Interface Web)
+  chatwoot:
+    image: chatwoot/chatwoot:latest
+    restart: always
+    depends_on:
+      - db
+      - redis
+    ports:
+      - "3000:3000"
+    environment:
+      FRONTEND_URL: ${FRONTEND_URL}
+      POSTGRES_DATABASE: ${POSTGRES_DB}
+      POSTGRES_HOST: db
+      POSTGRES_USERNAME: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      REDIS_URL: ${REDIS_URL}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      NODE_ENV: production
+    # Comando para iniciar o servidor web
+    command: bundle exec rails s -p 3000 -b 0.0.0.0
+
+  # Chatwoot Worker (Processamento em segundo plano)
+  chatwoot_worker:
+    image: chatwoot/chatwoot:latest
+    depends_on:
+      - db
+      - redis
+    environment:
+      FRONTEND_URL: ${FRONTEND_URL}
+      POSTGRES_DATABASE: ${POSTGRES_DB}
+      POSTGRES_HOST: db
+      POSTGRES_USERNAME: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      REDIS_URL: ${REDIS_URL}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      NODE_ENV: production
+    # Comando para iniciar o worker
+    command: bundle exec sidekiq -C config/sidekiq.yml
+
+  # n8n (Automação)
+  n8n:
+    image: n8nio/n8n:latest
+    restart: always
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_HOST=${N8N_HOST}
+      - N8N_PORT=${N8N_PORT}
+      - N8N_PROTOCOL=${N8N_PROTOCOL}
+      - WEBHOOK_URL=${WEBHOOK_URL}
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+  # Túnel Cloudflare (Para expor o Chatwoot para a Meta)
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --protocol http2 --url http://chatwoot:3000
+
+volumes:
+  postgres_data:
+  redis_data:
+  n8n_data:
